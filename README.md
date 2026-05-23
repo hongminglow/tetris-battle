@@ -168,7 +168,7 @@ Reference build size:
 ```
 dist/index.html               1.80 kB │ gzip:  0.75 kB
 dist/assets/index-*.css       2.66 kB │ gzip:  1.15 kB
-dist/assets/index-*.js       39.32 kB │ gzip: 12.80 kB
+dist/assets/index-*.js       41.53 kB │ gzip: 13.43 kB
 ```
 
 53 unit tests pass across 8 test files covering board, piece, kicks, RNG,
@@ -283,7 +283,11 @@ finishes the build. Each item is binary pass/fail.
 - [ ] T returns to title with a new seed.
 
 ### Polish + audio
-- [ ] Each line clear emits a particle burst.
+- [ ] Particles burst on line clears (8 per cell, additive blending),
+      colored by the locking piece's color.
+- [ ] Active piece has a piece-colored neon glow on the canvas.
+- [ ] HUD score / level / lines values flash accent cyan and scale up
+      briefly when they change.
 - [ ] Tetris triggers a 6 px screen shake for 200 ms; T-Spin Double/Triple
       8 px; KO 16 px / 500 ms.
 - [ ] Toasts ("TETRIS", "T-SPIN DOUBLE", "B2B", "5 COMBO") float upward
@@ -296,6 +300,7 @@ finishes the build. Each item is binary pass/fail.
       subsequent SFX play.
 - [ ] Hard drop, rotate, hold, lock, and each clear kind produce distinct
       SFX.
+- [ ] Combo blip stacks on top of clear chimes when `combo > 0`.
 - [ ] Countdown ticks on each phase change; "GO!" plays a chord.
 - [ ] KO plays a descending tone immediately. If the player won, a victory
       chord plays ~280 ms later.

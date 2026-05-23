@@ -70,6 +70,8 @@ export type GameEvent =
       type: "LinesCleared";
       rows: number[];
       kind: ClearKind;
+      /** The piece kind that locked into the board causing this clear. */
+      pieceKind: PieceKind;
       points: number;
       garbage: number;
       level: number;
@@ -441,6 +443,7 @@ export class GameState {
         type: "LinesCleared",
         rows: result.rows,
         kind,
+        pieceKind: lockedPiece.kind,
         points: score.points,
         garbage: score.garbage,
         level: this.level,

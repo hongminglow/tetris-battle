@@ -319,11 +319,20 @@ function bootstrap(): void {
 
       const clearSfx = sfxForClear(event);
       if (clearSfx !== null && side === "player") sfx.play(clearSfx);
+      if (
+        event.type === "LinesCleared" &&
+        event.combo > 0 &&
+        side === "player"
+      ) {
+        // Combo blip stacks on top of the clear chime; slightly delayed
+        // so it doesn't muddy the leading transient.
+        window.setTimeout(() => sfx.play("combo"), 80);
+      }
 
       if (event.type === "LinesCleared" && event.rows.length > 0) {
         const field = side === "player" ? app.particlesPlayer : app.particlesCpu;
         const visibleRows = event.rows.map((r) => r - 20).filter((r) => r >= 0);
-        field.emitClear(visibleRows, 0, "#22d3ee");
+        field.emitClear(visibleRows, 0, ParticleField.pieceColor(event.pieceKind));
       }
 
       if (event.type === "TopOut") {

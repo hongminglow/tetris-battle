@@ -406,7 +406,20 @@ title → countdown → playing ⇄ paused
 - Gravity: `0.0006` px / ms² applied to vertical velocity.
 - Lifetime: 600 ms.
 - Drawn with `globalCompositeOperation = "lighter"` (additive).
-- Color: piece color of the cleared cell (or accent color as fallback).
+- Color: the **locking piece's** color (`PIECE_COLORS[event.pieceKind]`).
+  The `LinesCleared` GameEvent must carry the `pieceKind` of the piece
+  that was just locked so the renderer can match the burst to that color.
+  Falling back to the accent color is acceptable only if no piece kind
+  is available.
+
+### Active piece glow
+
+- The active (currently-falling) piece is drawn with a colored neon glow
+  via `ctx.shadowColor = pieceColor; ctx.shadowBlur = 12` wrapped in
+  `ctx.save()` / `ctx.restore()`. This is applied to the active piece
+  only — the ghost outline keeps its plain `alpha = 0.5` look, and the
+  static stack is drawn without any shadow (shadow ops are expensive,
+  and per-cell glow on the whole stack thrashes the canvas).
 
 ### Screen shake
 
@@ -509,7 +522,7 @@ optional), `dur ms`, `osc type`, peak gain `g`.
 | `tetris`       | 440 + 660 + 880 (triangle) + 1320 (sine) chord stagger 30 ms each, ~360 ms total                               |
 | `tspin`        | 520 → 780 Hz, 110 ms, sawtooth + 780 Hz, 180 ms sine (delay 90 ms)                                             |
 | `perfect`      | 523 → 659 → 784 → 1047 chord stagger ~110 ms each, last note sine                                              |
-| `combo`        | 880 Hz, 90 ms, square, g 0.14 (currently unused for one-shot — reserved)                                       |
+| `combo`        | 880 Hz, 90 ms, square, g 0.14. Plays once per chain step (any clear with `combo > 0`), 80 ms after the kind-specific clear chime so it doesn't muddy the leading transient. |
 | `countdown`    | 440 Hz, 120 ms, sine, g 0.18                                                                                   |
 | `go`           | 660 Hz, 140 ms triangle + 990 Hz, 240 ms triangle (delay 80 ms)                                                |
 | `ko`           | 440 → 90 Hz, 700 ms sawtooth + 220 → 60 Hz, 500 ms triangle (delay 200 ms)                                     |
@@ -542,6 +555,7 @@ gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
 | `… `, kind `tetris`                                   | `tetris`       |
 | `… `, any T-spin kind                                 | `tspin`        |
 | `… `, `perfectClear: true`                            | `perfect` (overrides clear-kind sfx)  |
+| GameEvent `LinesCleared` with `combo > 0`             | `combo` (80 ms after the clear chime) |
 | Countdown phase change to a new number                | `countdown`    |
 | Countdown reaches 0 (transition to "GO!" → playing)   | `go`           |
 | GameEvent `TopOut` (either side)                      | `ko` (immediately) + `win` 280 ms later if player won |
@@ -656,6 +670,15 @@ The original `styles.css` produces a usable but plain layout. v1.1 adds:
   - Countdown numbers: cyan glow, blur 20. "GO!" uses green glow.
   - K.O. splash: red glow, blur 24.
   - Toasts: cyan glow, blur 8.
+  - Active piece on the board: piece-color glow, blur 12.
+
+### HUD value pulse
+
+- `score`, `level`, and `lines` values in the side HUD briefly flash to
+  the accent cyan (`#6ee7ff`) and scale to ~1.18× when their numeric
+  value changes, decaying back over 350 ms via CSS `transition: color
+  200ms ease, transform 200ms ease`. The pulse is driven by the renderer
+  detecting a value change against the previous frame.
 
 These refinements are visual-only — they MUST NOT change game state, RNG,
 or layout dimensions (board canvases are still 280×560 px).
@@ -958,7 +981,12 @@ Copy from README §6. Every item must pass:
 - [ ] Title → countdown → playing → result → rematch flow works.
 - [ ] R rematches with same seed; T returns to title with new seed.
 - [ ] P / Esc pauses; ? toggles controls overlay.
-- [ ] Particles burst on line clears (additive blending).
+- [ ] Particles burst on line clears (additive blending), colored by the
+      locking piece's piece color.
+- [ ] Active piece on each board has a piece-colored neon glow; the ghost
+      keeps its plain alpha-0.5 outline (no glow).
+- [ ] HUD score / level / lines values flash accent cyan and scale ~1.18×
+      for ~350 ms on each change.
 - [ ] Per-side screen shake on Tetris (6 px), T-Spin DT (8 px), KO (16 px).
 - [ ] At < 1024 px viewport, boards stack vertically.
 
@@ -971,6 +999,8 @@ Copy from README §6. Every item must pass:
 - [ ] Single / Double / Triple / Tetris each produce their own clear SFX.
 - [ ] T-spin produces a distinct chord; perfect clear overrides the
       kind-specific clear SFX.
+- [ ] Each clear with `combo > 0` plays the `combo` blip 80 ms after the
+      kind-specific clear chime.
 - [ ] Countdown plays a tick on each phase change and a chord on "GO!".
 - [ ] KO plays a descending sad tone immediately. If the player won, a
       victory chord plays ~280 ms later.

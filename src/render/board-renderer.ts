@@ -98,17 +98,23 @@ function drawStack(ctx: CanvasRenderingContext2D, board: Board): void {
 function drawPiece(
   ctx: CanvasRenderingContext2D,
   piece: Piece,
-  opts: { ghost?: boolean } = {},
+  opts: { ghost?: boolean; glow?: boolean } = {},
 ): void {
   const cells = shapeCells(piece.kind, piece.rot);
   const color = cellColor(piece.kind);
   if (color === null) return;
+  if (opts.glow === true && opts.ghost !== true) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+  }
   for (const [dx, dy] of cells) {
     const x = piece.x + dx;
     const y = piece.y + dy;
     if (y < VISIBLE_TOP) continue; // don't draw inside buffer
     drawCell(ctx, x, y - VISIBLE_TOP, color, opts);
   }
+  if (opts.glow === true && opts.ghost !== true) ctx.restore();
 }
 
 /** Top-level draw entry point. */
@@ -121,5 +127,5 @@ export function drawBoard(
   drawGrid(ctx);
   drawStack(ctx, board);
   if (opts.ghost !== undefined) drawPiece(ctx, opts.ghost, { ghost: true });
-  if (opts.active !== undefined) drawPiece(ctx, opts.active);
+  if (opts.active !== undefined) drawPiece(ctx, opts.active, { glow: true });
 }

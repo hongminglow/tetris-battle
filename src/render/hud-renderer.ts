@@ -23,6 +23,14 @@ interface MountedHud {
   holdEl: HTMLCanvasElement;
   nextEl: HTMLCanvasElement;
   garbageEl: HTMLElement;
+  /** Last seen values, used to detect changes for pulse animations. */
+  prevScore: number;
+  prevLevel: number;
+  prevLines: number;
+  /** Wall-clock timestamps until which each value is "freshly changed". */
+  scoreFlashUntil: number;
+  levelFlashUntil: number;
+  linesFlashUntil: number;
 }
 
 const MINI_CELL = 14;
@@ -44,6 +52,9 @@ export function mountHud(root: HTMLElement): MountedHud {
     lbl.style.color = "var(--fg-dim)";
     const val = document.createElement("span");
     val.style.color = "var(--fg)";
+    val.style.transition = "color 200ms ease, transform 200ms ease";
+    val.style.transformOrigin = "right center";
+    val.style.display = "inline-block";
     val.textContent = "0";
     wrap.append(lbl, val);
     root.append(wrap);
@@ -97,7 +108,20 @@ export function mountHud(root: HTMLElement): MountedHud {
   garbageEl.style.overflow = "hidden";
   root.append(garbageEl);
 
-  return { scoreEl, levelEl, linesEl, holdEl, nextEl, garbageEl };
+  return {
+    scoreEl,
+    levelEl,
+    linesEl,
+    holdEl,
+    nextEl,
+    garbageEl,
+    prevScore: 0,
+    prevLevel: 0,
+    prevLines: 0,
+    scoreFlashUntil: 0,
+    levelFlashUntil: 0,
+    linesFlashUntil: 0,
+  };
 }
 
 function drawMiniPiece(
@@ -132,6 +156,25 @@ function drawMiniPiece(
   }
 }
 
+const FLASH_MS = 350;
+const FLASH_COLOR = "#6ee7ff"; // accent
+
+function applyFlash(
+  el: HTMLElement,
+  flashUntil: number,
+  now: number,
+): void {
+  const remaining = flashUntil - now;
+  if (remaining > 0) {
+    const t = remaining / FLASH_MS;
+    el.style.color = FLASH_COLOR;
+    el.style.transform = `scale(${1 + 0.18 * t})`;
+  } else {
+    el.style.color = "var(--fg)";
+    el.style.transform = "scale(1)";
+  }
+}
+
 /** Updates the HUD from current GameState. */
 export function updateHud(
   hud: MountedHud,
@@ -139,9 +182,31 @@ export function updateHud(
   incomingGarbage: number,
   warningPulse = 1,
 ): void {
+  const now =
+    typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+
+  if (gs.score !== hud.prevScore) {
+    hud.prevScore = gs.score;
+    hud.scoreFlashUntil = now + FLASH_MS;
+  }
+  if (gs.level !== hud.prevLevel) {
+    hud.prevLevel = gs.level;
+    hud.levelFlashUntil = now + FLASH_MS;
+  }
+  if (gs.lines !== hud.prevLines) {
+    hud.prevLines = gs.lines;
+    hud.linesFlashUntil = now + FLASH_MS;
+  }
+
   hud.scoreEl.textContent = gs.score.toLocaleString();
   hud.levelEl.textContent = String(gs.level);
   hud.linesEl.textContent = String(gs.lines);
+
+  applyFlash(hud.scoreEl, hud.scoreFlashUntil, now);
+  applyFlash(hud.levelEl, hud.levelFlashUntil, now);
+  applyFlash(hud.linesEl, hud.linesFlashUntil, now);
 
   // Hold
   const hctx = hud.holdEl.getContext("2d");
