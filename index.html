@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Tetris Battle</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section class="board-wrap" data-side="player">
+        <h2 class="board-label">YOU</h2>
+        <canvas id="player" width="280" height="560" aria-label="Your playfield"></canvas>
+        <div class="board-hud" id="player-hud"></div>
+      </section>
+
+      <section class="center-hud" id="hud">
+        <div class="hud-line" id="hud-seed">seed: 0x00000000</div>
+        <div class="hud-line" id="hud-frame">frame: 0</div>
+      </section>
+
+      <section class="board-wrap" data-side="cpu">
+        <h2 class="board-label">CPU</h2>
+        <canvas id="cpu" width="280" height="560" aria-label="CPU playfield"></canvas>
+        <div class="board-hud" id="cpu-hud"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

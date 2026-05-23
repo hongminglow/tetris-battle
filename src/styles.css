@@ -1,0 +1,116 @@
+/* Tetris Battle — global stylesheet
+ * CSS-vars-driven theme; no framework. Updated incrementally per task. */
+
+:root {
+  --bg: #0b0d12;
+  --bg-board: #07090d;
+  --bg-panel: #11141b;
+  --grid: #1a1f2b;
+  --fg: #e7ecf3;
+  --fg-dim: #8a93a4;
+  --accent: #6ee7ff;
+  --warn: #ef4444;
+  --ok: #22c55e;
+
+  /* Tetromino piece colors (guideline standard) */
+  --piece-i: #22d3ee;
+  --piece-o: #eab308;
+  --piece-t: #a855f7;
+  --piece-s: #22c55e;
+  --piece-z: #ef4444;
+  --piece-j: #3b82f6;
+  --piece-l: #f97316;
+
+  --gutter: 4px;
+  --cell: 28px;
+
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 24px;
+  align-items: start;
+  justify-content: center;
+  padding: 24px;
+  min-height: 100vh;
+}
+
+.board-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gutter);
+}
+
+.board-label {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.15em;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+canvas {
+  background: var(--bg-board);
+  border: 1px solid var(--grid);
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.board-hud {
+  width: 280px;
+  min-height: 80px;
+  background: var(--bg-panel);
+  border: 1px solid var(--grid);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.center-hud {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--grid);
+  padding: 12px;
+  font-size: 12px;
+  color: var(--fg);
+  align-self: stretch;
+}
+
+.hud-line {
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1024px) {
+  #app {
+    grid-template-columns: 1fr;
+  }
+  .center-hud {
+    width: 280px;
+    align-self: center;
+  }
+}
