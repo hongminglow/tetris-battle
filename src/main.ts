@@ -16,7 +16,7 @@ import { drawBoard } from "./render/board-renderer";
 import { mountHud, updateHud } from "./render/hud-renderer";
 import { ParticleField } from "./render/particles";
 import { SfxEngine, type SfxName } from "./audio/synth";
-import { BgmPlayer } from "./audio/bgm";
+import { BgmPlayer, BATTLE_TRACK, MENU_TRACK } from "./audio/bgm";
 
 type Screen = "title" | "countdown" | "playing" | "paused" | "result";
 
@@ -148,6 +148,9 @@ function bootstrap(): void {
 
   const sfx = new SfxEngine();
   const bgm = new BgmPlayer(() => sfx.destination());
+  // Music defaults to enabled so the menu greets the user on first gesture.
+  bgm.enabled = true;
+  bgm.setTrack(MENU_TRACK);
 
   const app: AppState = {
     screen: "title",
@@ -201,11 +204,16 @@ function bootstrap(): void {
     app.resultSfxFired = false;
     app.screen = "countdown";
     sfx.play("countdown");
-    if (bgm.enabled) bgm.start();
+    bgm.setTrack(BATTLE_TRACK);
   }
 
   const kb = new Keyboard({
-    onGesture: () => sfx.resume(),
+    onGesture: () => {
+      sfx.resume();
+      // Kick off whichever BGM track is currently selected once the
+      // AudioContext has been resumed by the user gesture.
+      if (bgm.enabled) bgm.start();
+    },
     onSfx: (s) => {
       if (app.screen !== "playing") return;
       if (s === "softDropPress") return; // would be too noisy
@@ -215,7 +223,7 @@ function bootstrap(): void {
       if (intent === "pause") {
         if (app.screen === "playing") {
           app.screen = "paused";
-          if (bgm.enabled) bgm.stop();
+          bgm.stop();
         } else if (app.screen === "paused") {
           app.screen = "playing";
           if (bgm.enabled) bgm.start();
@@ -231,8 +239,6 @@ function bootstrap(): void {
         updateAudioStateLabel();
       } else if (intent === "music") {
         bgm.toggle();
-        if (!bgm.enabled) bgm.stop();
-        else if (app.screen === "playing" || app.screen === "countdown") bgm.start();
         updateAudioStateLabel();
       }
     },
@@ -243,6 +249,7 @@ function bootstrap(): void {
   window.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       sfx.resume();
+      if (bgm.enabled) bgm.start();
       if (app.screen === "title") {
         ev.preventDefault();
         startMatch();
@@ -254,11 +261,18 @@ function bootstrap(): void {
     if ((ev.key === "t" || ev.key === "T") && app.screen === "result") {
       app.screen = "title";
       reroll();
-      bgm.stop();
+      bgm.setTrack(MENU_TRACK);
     }
   });
   // Pointer click also counts as a gesture.
-  window.addEventListener("pointerdown", () => sfx.resume(), { passive: true });
+  window.addEventListener(
+    "pointerdown",
+    () => {
+      sfx.resume();
+      if (bgm.enabled) bgm.start();
+    },
+    { passive: true },
+  );
 
   let frameNumber = 0;
 
@@ -334,7 +348,7 @@ function bootstrap(): void {
           window.setTimeout(() => sfx.play("win"), 280);
         }
         app.resultSfxFired = true;
-        bgm.stop();
+        bgm.setTrack(null);
       }
     }
 

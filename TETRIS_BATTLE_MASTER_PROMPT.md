@@ -10,10 +10,12 @@
 > produce a working `dist/` plus all source code, tests, and a README.
 >
 > **v1.1 changes (vs v1.0):** added §5B (Audio spec) — procedural Web Audio
-> SFX + chiptune BGM with no asset files; added §5C (Visual polish refinements)
-> for the radial-glow backdrop, neon board frame, and brand wordmark; folder
-> layout now includes `src/audio/`; controls add `M` (mute SFX) and `N`
-> (toggle music); bundle-size cap raised to 50 kB JS to accommodate audio.
+> SFX + chiptune BGM (separate menu and battle tracks) with no asset files;
+> added §5C (Visual polish refinements) for the radial-glow backdrop, neon
+> board frame, and brand wordmark; folder layout now includes `src/audio/`;
+> controls add `M` (mute SFX) and `N` (toggle music); music defaults to ON
+> so the title screen greets the player with a cheerful theme; bundle-size
+> cap raised to 50 kB JS to accommodate audio.
 
 ---
 
@@ -29,8 +31,10 @@ guideline-faithful Tetris** as a 1-human-vs-CPU battle:
 - First top-out loses; rematch with same seed; new seed via title screen.
 - Polished: line-clear particles, screen shake, KO splash, garbage warning
   flash, responsive layout, neon-glow board frames, radial-glow backdrop.
-- Procedural audio: Web Audio API generates every SFX and a looping chiptune
-  BGM at runtime — **no audio files, no asset deps**.
+- Procedural audio: Web Audio API generates every SFX and two looping
+  chiptune BGM tracks (a cheerful C-major theme on the title/menu, a
+  driving A-minor riff during matches) at runtime — **no audio files,
+  no asset deps**.
 - Deterministic: one match seed → reproducible run.
 
 ---
@@ -549,33 +553,72 @@ Otherwise the CPU's autonomous play would be a constant cacophony.
 `garbageWarn` is rate-limited with a 220 ms cooldown inside `SfxEngine`
 so back-to-back warnings can't machine-gun.
 
-### BGM
+### BGM (two tracks)
 
-- Procedurally scheduled chiptune in **A minor**, **132 BPM**, in 4-bar
-  phrases.
-- Lead voice: square wave, ~16 notes per phrase (8th notes), peak gain 0.16.
-- Bass voice: triangle wave, quarter notes (root-on-1 pattern), peak gain
-  0.22.
-- Hi-hat tick: short square noise burst at ~7200 Hz on every 8th note,
-  peak gain 0.04.
-- Output goes through a per-BGM `GainNode` with `gain.value = 0.35` so it
-  sits below the SFX bus, then into the master gain.
+The game ships with **two** chiptune patterns. The `BgmPlayer` class holds
+one currently-selected track; switching tracks via `setTrack(track)`
+gracefully stops any in-flight notes from the old track and starts the
+new one (if music is enabled).
+
+#### `MENU_TRACK` — title / menu theme
+
+- **Mood**: cheerful, welcoming.
+- **Key / tempo**: C major, **112 BPM**, 4-bar phrase, 64 16th-note steps.
+- **Lead voice**: triangle wave (softer than the battle lead), peak gain 0.15.
+- **Bass voice**: triangle, peak gain 0.20.
+- **Hi-hat**: disabled (`hatEvery: 0`) for a less urgent feel.
+- **Bus gain**: 0.30.
+- **Chord progression**: I – V – IV – I (C – G – F – C). Each bar is a
+  bouncy arpeggio of that chord landing on the downbeat.
+
+#### `BATTLE_TRACK` — gameplay theme
+
+- **Mood**: driving, urgent.
+- **Key / tempo**: A minor, **132 BPM**, 4-bar phrase, 64 16th-note steps.
+- **Lead voice**: square, peak gain 0.16.
+- **Bass voice**: triangle (root-on-1 quarter notes), peak gain 0.22.
+- **Hi-hat**: every 8th note (`hatEvery: 2`), peak gain 0.04.
+- **Bus gain**: 0.35.
+
+#### Player implementation
+
+- Output goes through a per-BGM `GainNode` plugged into the SfxEngine
+  master node, so the global mute toggle silences music too.
 - **Lookahead scheduling**: a `setInterval(scheduler, 25 ms)` callback
   schedules every step that should fire within the next 200 ms via
   `osc.start(when)`. This is the standard Web Audio scheduling pattern
   and produces a gapless, dt-independent loop.
-- BGM **starts** when entering `countdown` (only if `bgm.enabled === true`).
-- BGM **stops** on entering `paused`, `result`, or `title`. Resumes on
-  un-pause.
+- **Default state**: `music.enabled = true` and `setTrack(MENU_TRACK)`
+  is called at boot. The track does not actually start producing sound
+  until the user's first gesture resumes the AudioContext.
+
+#### Track switching on screen transitions
+
+| Transition                              | Action                                |
+|-----------------------------------------|---------------------------------------|
+| Boot                                    | `setTrack(MENU_TRACK)`                |
+| Title → countdown (ENTER)               | `setTrack(BATTLE_TRACK)`              |
+| Playing → paused (P/Esc)                | `bgm.stop()` (track preserved)        |
+| Paused → playing                        | `bgm.start()` (resumes battle track)  |
+| Playing → result (top-out)              | `setTrack(null)`                      |
+| Result → title (T)                      | `setTrack(MENU_TRACK)`                |
+| Result → countdown (R rematch)          | `setTrack(BATTLE_TRACK)`              |
 
 ### Mute keys + HUD indicator
 
 - `M` toggles SFX master gain (0 ↔ 0.6). Persists across screens.
-- `N` toggles BGM. When toggled on during gameplay, music starts immediately;
-  when toggled off, music stops immediately.
+- `N` toggles BGM. When toggled on while a track is selected, music
+  starts immediately; when toggled off, music stops immediately. The
+  currently-selected track is remembered so re-enabling resumes the
+  right one.
 - The center HUD displays an `audio:` line whose format is
   `audio: <SFX-state> / <MUSIC-state>` where each state is uppercase when
   enabled and lowercase when disabled (e.g. `audio: SFX / music`).
+- Both `enabled` flags default to `true` at boot, but no sound is emitted
+  until the user's first gesture (keydown or pointerdown) resumes the
+  AudioContext. The gesture handler in `main.ts` does
+  `sfx.resume(); if (bgm.enabled) bgm.start();` so the menu BGM kicks in
+  the moment the user touches any key.
 
 ---
 
@@ -933,10 +976,20 @@ Copy from README §6. Every item must pass:
       victory chord plays ~280 ms later.
 - [ ] When player's incoming garbage crosses 4, a low warning blip fires
       once (not every frame).
-- [ ] BGM starts at countdown if music is enabled, stops on pause/result/title.
+- [ ] BGM has two distinct tracks: a cheerful `MENU_TRACK` on the title
+      screen and a driving `BATTLE_TRACK` during matches.
+- [ ] Title screen: pressing any key on the title resumes the AudioContext
+      and the menu BGM starts playing.
+- [ ] Pressing ENTER from title transitions to the battle BGM.
+- [ ] Playing → paused: BGM pauses; un-pause resumes it.
+- [ ] Playing → result: BGM stops.
+- [ ] Result → title (T): menu BGM restarts.
+- [ ] Result → rematch (R): battle BGM restarts.
 - [ ] BGM and SFX share a master gain that `M` toggles (mute kills both).
 - [ ] `M` toggles SFX, `N` toggles BGM independently. HUD `audio:` line
       reflects current state with case (uppercase = on).
+- [ ] Both `M` and `N` default to ON; players do not need to enable them
+      first.
 - [ ] CPU's own clears / locks do NOT play SFX.
 
 ### Code quality

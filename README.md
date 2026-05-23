@@ -68,7 +68,7 @@ cancellation against your own incoming queue. First top-out loses.
 | **Garbage exchange**| Send table per guideline; FIFO cancel against own incoming; surplus sent to opponent; materializes on next non-clearing lock with stable hole column per event |
 | **KO splash**       | Loser's board: 200 ms white flash + scaling glowing K.O. text + 16 px shake; opponent screen unchanged |
 | **Polish**          | Particle bursts on line clears (8 per cell, gravity 0.0006 px/ms², 600 ms life, additive blend); per-board screen shake (Tetris 6 px, T-Spin 8 px, KO 16 px); bottom-rows red pulse when incoming ≥ 4; radial-glow backdrop, neon board frames, gradient brand wordmark |
-| **Audio**           | Procedural Web Audio SFX (move / rotate / lock / hard drop / hold / single / double / triple / tetris / t-spin / perfect / countdown / GO / KO / win / garbage-warn) plus a looping 132 BPM A-minor chiptune BGM. Zero asset files; everything synthesized at runtime via `OscillatorNode + GainNode`. **M** mutes SFX, **N** toggles music |
+| **Audio**           | Procedural Web Audio SFX (move / rotate / lock / hard drop / hold / single / double / triple / tetris / t-spin / perfect / countdown / GO / KO / win / garbage-warn) plus two looping chiptune BGM tracks: a cheerful C-major theme on the title/menu and a driving 132 BPM A-minor riff during matches. Zero asset files; everything synthesized at runtime via `OscillatorNode + GainNode`. **M** mutes SFX, **N** toggles music; both default ON |
 | **Pause / rematch** | P/Esc pause; R rematch (same seed, deterministic replay); T return to title (new seed) |
 | **Determinism**     | One 32-bit match seed → split into two independent piece streams via `splitSeed`. Visible in HUD as `seed: 0xXXXXXXXX`, overridable via `?seed=` query string |
 
@@ -127,7 +127,7 @@ tetris-battle/
 │   │   └── dellacherie.ts           # bestPlacement using 4-feature heuristic
 │   ├── audio/
 │   │   ├── synth.ts                 # SfxEngine — 17 procedural Web Audio SFX
-│   │   └── bgm.ts                   # BgmPlayer — looping chiptune (4 bars, A minor, 132 BPM)
+│   │   └── bgm.ts                   # BgmPlayer + MENU_TRACK (C-major, 112 BPM) + BATTLE_TRACK (A-minor, 132 BPM)
 │   ├── render/
 │   │   ├── theme.ts                 # piece colors mirrored from CSS vars
 │   │   ├── board-renderer.ts        # canvas draw of stack + active + ghost
@@ -301,6 +301,9 @@ finishes the build. Each item is binary pass/fail.
       chord plays ~280 ms later.
 - [ ] BGM plays during countdown / playing only; stops on pause / result /
       title.
+- [ ] Title screen plays the cheerful menu BGM (`MENU_TRACK`) once the
+      user touches any key; pressing ENTER swaps to the battle BGM.
+- [ ] Returning to title via T (from result) restarts the menu BGM.
 - [ ] `M` mutes SFX (kills BGM too via shared master gain). `N` toggles
       music independently. The center HUD shows `audio: SFX / MUSIC` with
       case reflecting state.
