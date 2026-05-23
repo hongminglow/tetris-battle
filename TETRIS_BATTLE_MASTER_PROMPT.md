@@ -1,4 +1,4 @@
-# TETRIS BATTLE — MASTER PROMPT (v1.0)
+# TETRIS BATTLE — MASTER PROMPT (v1.1)
 
 > **You are an autonomous coding agent.** Your task is to build a complete,
 > playable, browser-based Tetris Battle game (1 human vs heuristic AI) in
@@ -8,6 +8,12 @@
 >
 > Hand this single document to the agent. No other files. The agent should
 > produce a working `dist/` plus all source code, tests, and a README.
+>
+> **v1.1 changes (vs v1.0):** added §5B (Audio spec) — procedural Web Audio
+> SFX + chiptune BGM with no asset files; added §5C (Visual polish refinements)
+> for the radial-glow backdrop, neon board frame, and brand wordmark; folder
+> layout now includes `src/audio/`; controls add `M` (mute SFX) and `N`
+> (toggle music); bundle-size cap raised to 50 kB JS to accommodate audio.
 
 ---
 
@@ -22,7 +28,9 @@ guideline-faithful Tetris** as a 1-human-vs-CPU battle:
 - Line clears send garbage lines to the opponent (with FIFO cancellation).
 - First top-out loses; rematch with same seed; new seed via title screen.
 - Polished: line-clear particles, screen shake, KO splash, garbage warning
-  flash, responsive layout.
+  flash, responsive layout, neon-glow board frames, radial-glow backdrop.
+- Procedural audio: Web Audio API generates every SFX and a looping chiptune
+  BGM at runtime — **no audio files, no asset deps**.
 - Deterministic: one match seed → reproducible run.
 
 ---
@@ -37,8 +45,12 @@ guideline-faithful Tetris** as a 1-human-vs-CPU battle:
 - **NO** UI framework (no React/Vue/Svelte).
 - **NO** game engine (no Phaser/Pixi).
 - **NO** CSS framework (no Tailwind/Bootstrap).
+- **NO** audio library (no Tone.js / Howler.js); use the **native** Web
+  Audio API via `AudioContext`.
 - **NO** other runtime deps. The only `dependencies` block in package.json
   should be empty; only `devDependencies` are populated.
+- **NO** bundled audio files (`.wav`, `.mp3`, `.ogg`); every sound is
+  synthesized at runtime.
 
 ---
 
@@ -72,6 +84,9 @@ tetris-battle/                    # everything inside this folder
 │   │   └── game.ts
 │   ├── ai/
 │   │   └── dellacherie.ts
+│   ├── audio/                    # procedural Web Audio (added in v1.1)
+│   │   ├── synth.ts              # SfxEngine — one-shot SFX
+│   │   └── bgm.ts                # BgmPlayer — looping chiptune
 │   ├── render/
 │   │   ├── theme.ts
 │   │   ├── board-renderer.ts
@@ -306,6 +321,8 @@ A side tops out (loses) when ANY of:
 - C / Shift  hold piece
 - P / Esc  pause / resume
 - ?        toggle controls overlay
+- M        toggle SFX mute (master gain on/off)
+- N        toggle BGM (start/stop music)
 - R        rematch on result screen (same seed)
 - T        return to title (new seed)
 - Enter    start match from title
@@ -322,10 +339,12 @@ title → countdown → playing ⇄ paused
 ### Title screen
 
 - Dim overlay on both boards.
-- "TETRIS BATTLE" logo centered on player canvas.
+- "TETRIS BATTLE" wordmark centered on player canvas, drawn with a
+  cyan→purple→green linear gradient + a soft cyan glow shadow.
 - "press ENTER to fight"
 - "S = new seed   ? = controls"
-- Display current seed `seed: 0xXXXXXXXX`.
+- "M = mute   N = music"
+- Display current seed `seed: 0xXXXXXXXX` in accent cyan.
 - "CPU is ready." dim text on CPU canvas.
 
 ### Countdown
@@ -333,23 +352,42 @@ title → countdown → playing ⇄ paused
 - Total duration 2800 ms.
 - Phases of 700 ms each: "3", "2", "1", "GO!".
 - Each phase: scale up from 0.8x to 1.0x, fade alpha 0.4 → 1.0.
+- Numbers glow cyan; "GO!" glows green.
 - Display centered on both canvases simultaneously.
+- Audio: a `countdown` blip on each phase change (3 → 2 → 1) and a `go`
+  chord on the final phase.
 
 ### Result screen
 
 - Dim overlay on both boards.
-- Loser's board: large red "K.O." + (if loser is the player) "YOU LOSE",
-  (if loser is the CPU) the OTHER board says "YOU WIN" in green.
-- Stats below: "score N", "lines N • level N".
+- Loser's board: large red glowing "K.O." text.
+- Winner's board: large green glowing "YOU WIN" or "CPU WINS" text.
+- Stats below each board: "score N", "lines N • level N".
 - "R = rematch    T = title".
+- Audio: `ko` SFX immediately; if the player won, queue `win` SFX 280 ms
+  later (so they don't overlap muddily).
+- BGM stops on entry.
 
 ### Pause
 
 - Dim overlay on both boards, large "PAUSED" text + "press P to resume".
+- BGM pauses (call `BgmPlayer.stop()`); resumes on un-pause.
 
 ### Controls overlay
 
-- Toggle with `?`. Lists all key bindings on the player canvas.
+- Toggle with `?`. Lists all key bindings on the player canvas including
+  M (mute) and N (music).
+
+### Center HUD column
+
+- A vertical panel between the two boards displaying:
+  - "TETRIS BATTLE" brand wordmark with the same gradient as the title
+    overlay.
+  - `seed: 0xXXXXXXXX` line.
+  - `audio: SFX / MUSIC` line (uppercase = enabled, lowercase = disabled).
+  - Frame counter / current screen state (debug-grade text).
+  - A divider, then a static controls cheat-sheet (same lines as the
+    overlay, in monospace).
 
 ---
 
@@ -382,13 +420,15 @@ title → countdown → playing ⇄ paused
 - Pulse: ~4 Hz sine.
 - Implementation: overlay a translucent red rectangle on the bottom 4
   rows with alpha varying `0.15 → 0.40` per pulse.
+- Audio: rising-edge `garbageWarn` SFX fires once when incoming for the
+  player crosses from <4 to ≥4. (See §5B failure-mode #A4.)
 
 ### KO splash
 
 - 200 ms (first 25% of 500 ms total): white flash overlay on the loser's
   board, alpha decreasing.
 - Full 500 ms: large "K.O." text scales from 0.4× to 1.0× over the
-  duration. Color red (#ef4444).
+  duration. Color red (#ef4444) with a 24 px red glow shadow.
 
 ### Responsive layout
 
@@ -420,6 +460,162 @@ title → countdown → playing ⇄ paused
 ```
 
 Cell size: 28 px. Board canvas: 280 × 560 px.
+
+---
+
+## 5B · Audio spec (NEW in v1.1)
+
+All audio is **synthesized at runtime** via the native Web Audio API. There
+are no asset files of any kind. The system has two parts: one-shot SFX and
+a looping BGM.
+
+### Audio graph
+
+- One `AudioContext` per app, lazily constructed (browsers throw if a page
+  creates an `AudioContext` without a user gesture; lazy creation lets us
+  defer it until the first keydown / click).
+- A single master `GainNode` with `gain.value = 0.6` connecting to
+  `ctx.destination`. Mute toggles set `gain.value = 0`.
+- `SfxEngine.destination()` returns `{ ctx, node }` so the BGM can plug
+  into the same master gain — that way muting kills BGM too.
+
+### User-gesture handling (browser autoplay policy)
+
+- Before any user gesture, calls to `play()` are **silently skipped**.
+- `SfxEngine.resume()` is called from the first `keydown` / `pointerdown`
+  event in `main.ts`. This `await ctx.resume()` resolves the suspended
+  context. Subsequent calls to `play()` work normally.
+
+### SFX names + envelopes
+
+Each SFX is one or more oscillator+gain pairs (no audio buffers). Format
+below: `freq Hz` (start) `→ toFreq Hz` (end via `exponentialRampToValueAtTime`,
+optional), `dur ms`, `osc type`, peak gain `g`.
+
+| Name           | Synthesis                                                                                                      |
+|----------------|----------------------------------------------------------------------------------------------------------------|
+| `move`         | 220 Hz, 30 ms, square, g 0.08                                                                                  |
+| `rotate`       | 330 Hz, 50 ms, square, g 0.10                                                                                  |
+| `lock`         | 110 → 70 Hz, 80 ms, triangle, g 0.18                                                                           |
+| `hardDrop`     | 260 → 80 Hz, 70 ms, sawtooth, g 0.22 + 90 Hz, 90 ms triangle (delay 30 ms), g 0.18                             |
+| `hold`         | 380 Hz, 70 ms, sine, g 0.16 + 280 Hz, 80 ms sine (delay 60 ms), g 0.14                                         |
+| `single`       | 660 Hz, 180 ms, sine, g 0.20                                                                                   |
+| `double`       | 660 Hz, 180 ms, sine + 880 Hz, 220 ms (delay 90 ms)                                                            |
+| `triple`       | 660 Hz, 140 ms + 880 Hz (delay 80 ms) + 1100 Hz, 220 ms (delay 160 ms), all sine                               |
+| `tetris`       | 440 + 660 + 880 (triangle) + 1320 (sine) chord stagger 30 ms each, ~360 ms total                               |
+| `tspin`        | 520 → 780 Hz, 110 ms, sawtooth + 780 Hz, 180 ms sine (delay 90 ms)                                             |
+| `perfect`      | 523 → 659 → 784 → 1047 chord stagger ~110 ms each, last note sine                                              |
+| `combo`        | 880 Hz, 90 ms, square, g 0.14 (currently unused for one-shot — reserved)                                       |
+| `countdown`    | 440 Hz, 120 ms, sine, g 0.18                                                                                   |
+| `go`           | 660 Hz, 140 ms triangle + 990 Hz, 240 ms triangle (delay 80 ms)                                                |
+| `ko`           | 440 → 90 Hz, 700 ms sawtooth + 220 → 60 Hz, 500 ms triangle (delay 200 ms)                                     |
+| `win`          | 523 → 659 → 784 → 1047 stagger ~140 ms each, last note sine, g 0.22                                            |
+| `garbageWarn`  | 130 → 90 Hz, 90 ms sawtooth                                                                                    |
+
+Envelope for every note:
+
+```
+gain.setValueAtTime(0.0001, t0)
+gain.exponentialRampToValueAtTime(peak, t0 + 0.005)
+gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+```
+
+(Use `0.0001` instead of `0` because `exponentialRampToValueAtTime` rejects
+0.) Then `osc.start(t0); osc.stop(t0 + dur + 0.02)`.
+
+### When SFX fire
+
+| Event source                                          | SFX name       |
+|-------------------------------------------------------|----------------|
+| Keyboard: ← / → press (initial keydown only — *not* every ARR repeat) | `move`         |
+| Keyboard: ↑ / Z / X / A press                         | `rotate`       |
+| Keyboard: Space                                       | `hardDrop`     |
+| Keyboard: C / Shift                                   | `hold`         |
+| GameEvent `Lock` on player side                       | `lock`         |
+| GameEvent `LinesCleared`, kind `single`               | `single`       |
+| `… `, kind `double`                                   | `double`       |
+| `… `, kind `triple`                                   | `triple`       |
+| `… `, kind `tetris`                                   | `tetris`       |
+| `… `, any T-spin kind                                 | `tspin`        |
+| `… `, `perfectClear: true`                            | `perfect` (overrides clear-kind sfx)  |
+| Countdown phase change to a new number                | `countdown`    |
+| Countdown reaches 0 (transition to "GO!" → playing)   | `go`           |
+| GameEvent `TopOut` (either side)                      | `ko` (immediately) + `win` 280 ms later if player won |
+| Player's incoming garbage rises from <4 to ≥4         | `garbageWarn`  |
+
+Important: SFX only fire for the **player** side, never for the CPU side.
+Otherwise the CPU's autonomous play would be a constant cacophony.
+
+`garbageWarn` is rate-limited with a 220 ms cooldown inside `SfxEngine`
+so back-to-back warnings can't machine-gun.
+
+### BGM
+
+- Procedurally scheduled chiptune in **A minor**, **132 BPM**, in 4-bar
+  phrases.
+- Lead voice: square wave, ~16 notes per phrase (8th notes), peak gain 0.16.
+- Bass voice: triangle wave, quarter notes (root-on-1 pattern), peak gain
+  0.22.
+- Hi-hat tick: short square noise burst at ~7200 Hz on every 8th note,
+  peak gain 0.04.
+- Output goes through a per-BGM `GainNode` with `gain.value = 0.35` so it
+  sits below the SFX bus, then into the master gain.
+- **Lookahead scheduling**: a `setInterval(scheduler, 25 ms)` callback
+  schedules every step that should fire within the next 200 ms via
+  `osc.start(when)`. This is the standard Web Audio scheduling pattern
+  and produces a gapless, dt-independent loop.
+- BGM **starts** when entering `countdown` (only if `bgm.enabled === true`).
+- BGM **stops** on entering `paused`, `result`, or `title`. Resumes on
+  un-pause.
+
+### Mute keys + HUD indicator
+
+- `M` toggles SFX master gain (0 ↔ 0.6). Persists across screens.
+- `N` toggles BGM. When toggled on during gameplay, music starts immediately;
+  when toggled off, music stops immediately.
+- The center HUD displays an `audio:` line whose format is
+  `audio: <SFX-state> / <MUSIC-state>` where each state is uppercase when
+  enabled and lowercase when disabled (e.g. `audio: SFX / music`).
+
+---
+
+## 5C · Visual polish refinements (NEW in v1.1)
+
+The original `styles.css` produces a usable but plain layout. v1.1 adds:
+
+### Backdrop
+
+- A fixed-position `<div class="bg-glow">` covering the viewport behind
+  everything, with `z-index: -1` and `pointer-events: none`. It paints
+  three radial gradients (cyan top-left, purple bottom-right, green bottom-
+  center, all at alpha ~0.10).
+
+### Board frame
+
+- Each canvas is wrapped in a `<div class="board-frame">` with
+  `padding: 4px`, a 1 px cyan-tinted border, a faint vertical gradient
+  background (cyan → purple, both at ~0.06 alpha), and `box-shadow` that
+  adds an inner dark ring + a soft outer cyan glow + a heavy bottom drop
+  shadow.
+
+### Brand wordmark
+
+- The center HUD's `<h1 class="brand">` shows "TETRIS BATTLE" with
+  `background: linear-gradient(90deg, #22d3ee, #a855f7, #22c55e)` clipped
+  to text via `-webkit-background-clip: text; color: transparent`. Letter
+  spacing 0.18em, font-weight 700.
+
+### Glow text
+
+- Title/countdown/KO/result text uses a canvas `ctx.shadowColor` +
+  `ctx.shadowBlur` for a neon glow:
+  - Title: cyan glow, blur 18.
+  - Countdown numbers: cyan glow, blur 20. "GO!" uses green glow.
+  - K.O. splash: red glow, blur 24.
+  - Toasts: cyan glow, blur 8.
+
+These refinements are visual-only — they MUST NOT change game state, RNG,
+or layout dimensions (board canvases are still 280×560 px).
 
 ---
 
@@ -481,13 +677,17 @@ use hold for MVP.
   randomness.
 - `?seed=0xXXXXXXXX` URL parameter overrides `Date.now()`.
 - Same seed + same input sequence → identical run.
+- Audio is non-deterministic by design (it depends on real wall-clock time
+  via `AudioContext.currentTime`) and MUST NOT be coupled to game RNG.
 
 ---
 
 ## 8 · Test spec (Vitest)
 
 Implement these named test files, each containing the minimum cases listed.
-Names matter — graders may check by file name.
+Names matter — graders may check by file name. Audio is intentionally
+**not** unit-tested; the audio modules are pure side-effect on
+`AudioContext`, which jsdom does not implement.
 
 ### `tests/board.test.ts`
 - `createBoard()` returns 40×10 zero grid.
@@ -548,6 +748,8 @@ Names matter — graders may check by file name.
 
 These are the failure modes seen most often in early LLM runs. Each one
 is graded explicitly. Your implementation MUST NOT exhibit any of them.
+
+### Engine / gameplay (from v1.0)
 
 1. **Rotation without kicks** — implementing rotation as "test base
    position; if collide, fail" with no kick walk. Symptom: T-spins
@@ -632,14 +834,61 @@ is graded explicitly. Your implementation MUST NOT exhibit any of them.
     if `lastWasRotate` is left stale. Reset `lastWasRotate = false`
     whenever the AI sets the piece directly.
 
+### Audio (NEW in v1.1)
+
+A1. **Creating `AudioContext` at module load** — Chromium and Safari throw
+    or auto-suspend the context when no user gesture has occurred yet. The
+    `AudioContext` MUST be lazily constructed on first call and resumed
+    inside a gesture handler.
+
+A2. **Playing SFX before `ctx.resume()`** — context state stays `"suspended"`
+    and SFX are silently swallowed. Implement a `resume()` method called
+    from the first `keydown` / `pointerdown` listener in `main.ts`.
+
+A3. **SFX for every ARR-repeated move** — holding ← or → emits one move
+    every 33 ms; if you fire `move` SFX from the action-queue drain, it
+    machine-guns. Fire `move` from `keydown` only (initial press), not
+    from drained actions.
+
+A4. **`garbageWarn` machine-guns** — without a cooldown, the SFX fires
+    every frame the warning is on. Either fire on the rising edge
+    (incoming crosses from <4 to ≥4) and add a 220 ms cooldown inside
+    `SfxEngine`, or both.
+
+A5. **CPU events triggering player SFX** — the SFX system is one-sided:
+    only react to `Lock` / `LinesCleared` / `TopOut` whose `side` equals
+    `"player"`. CPU's own clears must not chime.
+
+A6. **BGM keeps playing on pause / result / title** — call `bgm.stop()`
+    on `paused`, `result`, and `title` entry. Without this, the game ends
+    but the music keeps looping.
+
+A7. **No mute toggle** — players in shared spaces need `M` to silence
+    SFX and `N` to silence music independently.
+
+A8. **Bundled audio file** — the spec forbids assets. If you find yourself
+    importing `.mp3` or `.wav`, you've gone wrong; everything must be
+    synthesized via `OscillatorNode + GainNode`.
+
+A9. **Audio coupled to game RNG** — using `Math.random()` inside SFX is
+    fine and expected (jitter), but DO NOT call into the game's seeded
+    RNG from audio code; that would perturb determinism.
+
 ---
 
 ## 10 · Acceptance checklist
 
 Copy from README §6. Every item must pass:
 
+### Boot + visual
 - [ ] Boot opens dual-canvas page with seed visible in HUD.
+- [ ] Background has a soft radial-gradient glow (cyan + purple + green)
+      behind the boards.
+- [ ] Each board has a glowing neon-cyan frame.
+- [ ] Center HUD shows the gradient brand wordmark + seed + audio state.
 - [ ] `?seed=0xCAFEBABE` produces deterministic pieces.
+
+### Engine
 - [ ] All 7 pieces rotate via SRS kick tables (I uses I-table; JLSTZ uses
       shared table; O is no-op).
 - [ ] I-piece in 4-wide well rotates to vertical via kick index 3.
@@ -653,6 +902,8 @@ Copy from README §6. Every item must pass:
       pieces → null; non-rotation locks → null.
 - [ ] Level advances every 10 lines; gravity speeds up.
 - [ ] Top-out on spawn-collision OR lock-entirely-in-buffer.
+
+### CPU + match flow
 - [ ] CPU plays autonomously, evaluates rotation AND column.
 - [ ] Garbage send table per spec; B2B +1; combo bonus per chain;
       perfect clear +10.
@@ -660,16 +911,39 @@ Copy from README §6. Every item must pass:
       per event.
 - [ ] Garbage materializes on next non-clearing lock.
 - [ ] When incoming ≥ 4, bottom 4 rows pulse red.
-- [ ] KO triggers white flash + scaling K.O. text + 16 px shake.
+- [ ] KO triggers white flash + scaling glowing K.O. text + 16 px shake.
 - [ ] Title → countdown → playing → result → rematch flow works.
 - [ ] R rematches with same seed; T returns to title with new seed.
 - [ ] P / Esc pauses; ? toggles controls overlay.
 - [ ] Particles burst on line clears (additive blending).
 - [ ] Per-side screen shake on Tetris (6 px), T-Spin DT (8 px), KO (16 px).
 - [ ] At < 1024 px viewport, boards stack vertically.
+
+### Audio
+- [ ] No `.mp3` / `.wav` / `.ogg` files anywhere in the repo.
+- [ ] First keypress on title resumes the AudioContext; subsequent
+      gameplay produces SFX.
+- [ ] Hard drop produces a punchy thump; rotate produces a subtle blip;
+      hold produces a two-note swap.
+- [ ] Single / Double / Triple / Tetris each produce their own clear SFX.
+- [ ] T-spin produces a distinct chord; perfect clear overrides the
+      kind-specific clear SFX.
+- [ ] Countdown plays a tick on each phase change and a chord on "GO!".
+- [ ] KO plays a descending sad tone immediately. If the player won, a
+      victory chord plays ~280 ms later.
+- [ ] When player's incoming garbage crosses 4, a low warning blip fires
+      once (not every frame).
+- [ ] BGM starts at countdown if music is enabled, stops on pause/result/title.
+- [ ] BGM and SFX share a master gain that `M` toggles (mute kills both).
+- [ ] `M` toggles SFX, `N` toggles BGM independently. HUD `audio:` line
+      reflects current state with case (uppercase = on).
+- [ ] CPU's own clears / locks do NOT play SFX.
+
+### Code quality
 - [ ] `npm run build` runs `tsc --noEmit && vite build`, both clean.
 - [ ] `npm test` passes all named test files.
-- [ ] Bundle size: dist/assets/index-*.js < 35 kB.
+- [ ] Bundle size: `dist/assets/index-*.js < 50 kB` (raised from 35 kB
+      in v1.0 to accommodate the audio system).
 - [ ] No runtime deps beyond what's in `package.json`.
 
 If every box is checked, the LLM has reproduced the reference build.
@@ -678,9 +952,19 @@ If every box is checked, the LLM has reproduced the reference build.
 
 ## 11 · Hand-off note for the implementing agent
 
-Build incrementally: scaffold first, then engine primitives + tests
-(board / piece / kicks / rng), then game state + scoring + tspin, then
-input + HUD + render, then AI + Battle + match flow + polish + docs.
+Build incrementally:
+1. Scaffold (folder layout + tsconfig + vite + vitest).
+2. Engine primitives + tests (board / piece / kicks / rng).
+3. GameState + scoring + tspin + their tests.
+4. Input (DAS/ARR keyboard) + HUD + render.
+5. AI + Battle + match flow.
+6. Polish (particles, shake, KO splash, garbage warn).
+7. Audio (`src/audio/synth.ts` then `src/audio/bgm.ts`, then wire into
+   `main.ts` and `keyboard.ts`).
+8. Visual polish refinements (`bg-glow`, board frames, brand wordmark,
+   glow shadows).
+9. Docs (README + this MASTER_PROMPT.md).
+
 Run `npm test` and `npm run build` between major increments. Do not skip
 any checklist item — the spec is exhaustive on purpose.
 

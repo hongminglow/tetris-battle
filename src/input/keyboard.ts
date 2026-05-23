@@ -31,11 +31,30 @@ export const SOFT_DROP_INTERVAL_MS = 16.7; // ~20× normal gravity at level 1
 
 type HeldDir = "left" | "right" | null;
 
+export type KeyboardIntent =
+  | "pause"
+  | "controls"
+  | "restart"
+  | "rematch"
+  | "mute"
+  | "music";
+
+export type KeyboardSfx =
+  | "move"
+  | "rotate"
+  | "hardDrop"
+  | "hold"
+  | "softDropPress";
+
 export interface KeyboardOptions {
   /** Element to attach listeners to. Defaults to window. */
   target?: EventTarget;
   /** Callback invoked when a high-level intent fires (pause, etc). */
-  onIntent?: (intent: "pause" | "controls" | "restart" | "rematch") => void;
+  onIntent?: (intent: KeyboardIntent) => void;
+  /** Callback invoked when a key press should produce an SFX. */
+  onSfx?: (sfx: KeyboardSfx) => void;
+  /** Resume audio on first user gesture (browser autoplay policy). */
+  onGesture?: () => void;
 }
 
 export class Keyboard {
@@ -50,10 +69,14 @@ export class Keyboard {
   private readonly queued: Action[] = [];
   private readonly target: EventTarget;
   private readonly onIntent: KeyboardOptions["onIntent"];
+  private readonly onSfx: KeyboardOptions["onSfx"];
+  private readonly onGesture: KeyboardOptions["onGesture"];
 
   constructor(opts: KeyboardOptions = {}) {
     this.target = opts.target ?? window;
     this.onIntent = opts.onIntent;
+    this.onSfx = opts.onSfx;
+    this.onGesture = opts.onGesture;
     this.attach();
   }
 
@@ -102,48 +125,58 @@ export class Keyboard {
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
     if (ev.repeat) return;
+    // Any keypress is a "user gesture" for audio purposes.
+    this.onGesture?.();
     const k = ev.key;
 
     switch (k) {
       case "ArrowLeft":
         ev.preventDefault();
         this.startDir("left");
+        this.onSfx?.("move");
         break;
       case "ArrowRight":
         ev.preventDefault();
         this.startDir("right");
+        this.onSfx?.("move");
         break;
       case "ArrowDown":
         ev.preventDefault();
         this.softDropHeld = true;
         this.softDropTimer = 0;
         this.queued.push({ type: "SoftDropStep" });
+        this.onSfx?.("softDropPress");
         break;
       case "ArrowUp":
       case "x":
       case "X":
         ev.preventDefault();
         this.queued.push({ type: "RotateCW" });
+        this.onSfx?.("rotate");
         break;
       case "z":
       case "Z":
         ev.preventDefault();
         this.queued.push({ type: "RotateCCW" });
+        this.onSfx?.("rotate");
         break;
       case "a":
       case "A":
         ev.preventDefault();
         this.queued.push({ type: "Rotate180" });
+        this.onSfx?.("rotate");
         break;
       case " ":
         ev.preventDefault();
         this.queued.push({ type: "HardDrop" });
+        this.onSfx?.("hardDrop");
         break;
       case "c":
       case "C":
       case "Shift":
         ev.preventDefault();
         this.queued.push({ type: "Hold" });
+        this.onSfx?.("hold");
         break;
       case "p":
       case "P":
@@ -157,6 +190,14 @@ export class Keyboard {
       case "r":
       case "R":
         this.onIntent?.("rematch");
+        break;
+      case "m":
+      case "M":
+        this.onIntent?.("mute");
+        break;
+      case "n":
+      case "N":
+        this.onIntent?.("music");
         break;
       default:
         break;

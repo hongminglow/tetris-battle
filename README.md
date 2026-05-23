@@ -66,8 +66,9 @@ cancellation against your own incoming queue. First top-out loses.
 | **HUD per side**    | score, level, lines; next-5 piece preview; hold slot; incoming garbage bar |
 | **Scoring**         | Single 100 / Double 300 / Triple 500 / Tetris 800; T-Spin Single 800 / Double 1200 / Triple 1600 / Mini 100; B2B ×1.5; combo 50×combo×level; perfect clear +1500 |
 | **Garbage exchange**| Send table per guideline; FIFO cancel against own incoming; surplus sent to opponent; materializes on next non-clearing lock with stable hole column per event |
-| **KO splash**       | Loser's board: 200 ms white flash + scaling K.O. text + 16 px shake; opponent screen unchanged |
-| **Polish**          | Particle bursts on line clears (8 per cell, gravity 0.0006 px/ms², 600 ms life, additive blend); per-board screen shake (Tetris 6 px, T-Spin 8 px, KO 16 px); bottom-rows red pulse when incoming ≥ 4 |
+| **KO splash**       | Loser's board: 200 ms white flash + scaling glowing K.O. text + 16 px shake; opponent screen unchanged |
+| **Polish**          | Particle bursts on line clears (8 per cell, gravity 0.0006 px/ms², 600 ms life, additive blend); per-board screen shake (Tetris 6 px, T-Spin 8 px, KO 16 px); bottom-rows red pulse when incoming ≥ 4; radial-glow backdrop, neon board frames, gradient brand wordmark |
+| **Audio**           | Procedural Web Audio SFX (move / rotate / lock / hard drop / hold / single / double / triple / tetris / t-spin / perfect / countdown / GO / KO / win / garbage-warn) plus a looping 132 BPM A-minor chiptune BGM. Zero asset files; everything synthesized at runtime via `OscillatorNode + GainNode`. **M** mutes SFX, **N** toggles music |
 | **Pause / rematch** | P/Esc pause; R rematch (same seed, deterministic replay); T return to title (new seed) |
 | **Determinism**     | One 32-bit match seed → split into two independent piece streams via `splitSeed`. Visible in HUD as `seed: 0xXXXXXXXX`, overridable via `?seed=` query string |
 
@@ -83,10 +84,13 @@ cancellation against your own incoming queue. First top-out loses.
 | Vitest      | 2        | unit tests |
 | @types/node | 20       | Node typings |
 
-**No** UI framework. **No** game engine. **No** CSS framework. **No** other
-runtime deps. The entire app is plain TypeScript modules + Canvas2D + a
-single `styles.css` (~120 lines). The benchmark value is in seeing whether
-an LLM can build a real game without leaning on familiar framework idioms.
+**No** UI framework. **No** game engine. **No** CSS framework. **No** audio
+library. **No** other runtime deps. The entire app is plain TypeScript
+modules + Canvas2D + the native Web Audio API + a single `styles.css`
+(~190 lines). Every sound effect and the BGM are synthesized at runtime
+via `OscillatorNode + GainNode`. The benchmark value is in seeing whether
+an LLM can build a real game without leaning on familiar framework idioms
+or pre-baked audio assets.
 
 ---
 
@@ -94,7 +98,6 @@ an LLM can build a real game without leaning on familiar framework idioms.
 
 ```
 tetris-battle/
-├── PLAN.md                          # the full implementation plan
 ├── README.md                        # this file
 ├── TETRIS_BATTLE_MASTER_PROMPT.md   # the benchmark prompt (LLM input)
 ├── index.html
@@ -122,6 +125,9 @@ tetris-battle/
 │   │   └── game.ts                  # GameState class + Action / GameEvent unions
 │   ├── ai/
 │   │   └── dellacherie.ts           # bestPlacement using 4-feature heuristic
+│   ├── audio/
+│   │   ├── synth.ts                 # SfxEngine — 17 procedural Web Audio SFX
+│   │   └── bgm.ts                   # BgmPlayer — looping chiptune (4 bars, A minor, 132 BPM)
 │   ├── render/
 │   │   ├── theme.ts                 # piece colors mirrored from CSS vars
 │   │   ├── board-renderer.ts        # canvas draw of stack + active + ghost
@@ -160,13 +166,15 @@ npm test         # vitest
 Reference build size:
 
 ```
-dist/index.html               1.21 kB │ gzip:  0.51 kB
-dist/assets/index-*.css       1.56 kB │ gzip:  0.75 kB
-dist/assets/index-*.js       30.70 kB │ gzip: 10.33 kB
+dist/index.html               1.80 kB │ gzip:  0.75 kB
+dist/assets/index-*.css       2.66 kB │ gzip:  1.15 kB
+dist/assets/index-*.js       39.32 kB │ gzip: 12.80 kB
 ```
 
 53 unit tests pass across 8 test files covering board, piece, kicks, RNG,
-scoring, T-spin, AI heuristic, and a smoke test.
+scoring, T-spin, AI heuristic, and a smoke test. Audio is intentionally
+not unit-tested (it is pure side-effect on `AudioContext`, which jsdom
+does not implement); it is exercised manually via the acceptance checklist.
 
 ---
 
@@ -274,13 +282,29 @@ finishes the build. Each item is binary pass/fail.
 - [ ] R rematch reuses the same match seed (deterministic replay).
 - [ ] T returns to title with a new seed.
 
-### Polish
+### Polish + audio
 - [ ] Each line clear emits a particle burst.
 - [ ] Tetris triggers a 6 px screen shake for 200 ms; T-Spin Double/Triple
       8 px; KO 16 px / 500 ms.
 - [ ] Toasts ("TETRIS", "T-SPIN DOUBLE", "B2B", "5 COMBO") float upward
       and fade out within ~1 s.
 - [ ] At viewport width < 1024 px, boards stack vertically (player on top).
+- [ ] Background has a soft radial-gradient glow (cyan + purple + green).
+- [ ] Boards have a glowing neon-cyan frame; the title and KO/result texts
+      have neon glow shadows on the canvas.
+- [ ] First keypress on the title screen resumes the AudioContext and
+      subsequent SFX play.
+- [ ] Hard drop, rotate, hold, lock, and each clear kind produce distinct
+      SFX.
+- [ ] Countdown ticks on each phase change; "GO!" plays a chord.
+- [ ] KO plays a descending tone immediately. If the player won, a victory
+      chord plays ~280 ms later.
+- [ ] BGM plays during countdown / playing only; stops on pause / result /
+      title.
+- [ ] `M` mutes SFX (kills BGM too via shared master gain). `N` toggles
+      music independently. The center HUD shows `audio: SFX / MUSIC` with
+      case reflecting state.
+- [ ] CPU's clears / locks do NOT play SFX — only the player's do.
 
 ### Code quality
 - [ ] `npm run build` runs `tsc --noEmit` first and passes with no errors.
@@ -330,6 +354,26 @@ prompt. The MASTER_PROMPT calls each one out explicitly with its symptom.
 19. **Toasts/particles on every lock instead of every clear** → visual noise.
 20. **Garbage materializes during a clearing lock** → garbage rises while
     lines are clearing; should defer to the NEXT non-clearing lock.
+
+### Audio-specific (added in v1.1)
+
+21. **Creating `AudioContext` at module load** → Chromium / Safari throw
+    or auto-suspend; lazily construct on first call and resume() inside a
+    user-gesture handler.
+22. **Playing SFX before the AudioContext resumes** → silently swallowed.
+23. **Move SFX on every ARR-repeated tick** → machine-gun while holding ←/→.
+    Fire the move SFX from `keydown` only, not from drained actions.
+24. **`garbageWarn` fires every frame the warning is on** → use rising-edge
+    detection (incoming crosses 4) plus a 220 ms cooldown inside the SFX
+    engine.
+25. **CPU events triggering player SFX** → only react to events whose
+    `side === "player"`. The CPU's clears and locks must be silent.
+26. **BGM keeps playing on pause / result / title** → stop the player on
+    those screen transitions; restart on un-pause.
+27. **No mute toggle / no music toggle** → players in shared spaces need
+    `M` (SFX) and `N` (BGM) to work independently.
+28. **Bundled audio file (.mp3 / .wav / .ogg)** → spec forbids assets;
+    every sound must be synthesized via `OscillatorNode + GainNode`.
 
 ---
 

@@ -2,19 +2,21 @@
  * Tetris Battle — entrypoint.
  *
  * Wires the fixed-timestep loop to Battle (player + CPU + garbage exchange)
- * + Keyboard + HUD renderer + screen state machine.
+ * + Keyboard + HUD renderer + screen state machine + audio (SFX + BGM).
  *
  * Touched in: Task 1 (boot), Task 9 (Battle/AI), Task 10 (garbage HUD),
- * Task 11 (match shell), Task 12 (polish).
+ * Task 11 (match shell), Task 12 (polish), polish-pass (audio + UI glow).
  */
 
 import { Loop } from "./app/Loop";
 import { type GameEvent } from "./engine/game";
 import { Keyboard } from "./input/keyboard";
-import { Battle, type BattleEvent, type Side } from "./match/Battle";
+import { Battle, type Side } from "./match/Battle";
 import { drawBoard } from "./render/board-renderer";
 import { mountHud, updateHud } from "./render/hud-renderer";
 import { ParticleField } from "./render/particles";
+import { SfxEngine, type SfxName } from "./audio/synth";
+import { BgmPlayer } from "./audio/bgm";
 
 type Screen = "title" | "countdown" | "playing" | "paused" | "result";
 
@@ -40,15 +42,16 @@ interface AppState {
   toasts: Toast[];
   shakes: Shake[];
   countdownMs: number;
+  countdownPhase: number; // 4=start, 3,2,1,0(GO)
   matchStartMs: number;
-  /** "player" lost | "cpu" lost (= player won) | null */
   loser: Side | null;
-  /** ms since rendering started (used for pulse animations). */
   timeMs: number;
   particlesPlayer: ParticleField;
   particlesCpu: ParticleField;
-  /** ms remaining on the K.O. splash flash on the loser's board. */
   koFlashMs: number;
+  prevIncomingPlayer: number;
+  prevIncomingCpu: number;
+  resultSfxFired: boolean;
 }
 
 function readSeedFromUrl(): number | null {
@@ -109,12 +112,32 @@ function shakeAmountFor(ev: GameEvent): number {
   return 0;
 }
 
+function sfxForClear(ev: GameEvent): SfxName | null {
+  if (ev.type !== "LinesCleared") return null;
+  if (ev.perfectClear) return "perfect";
+  switch (ev.kind) {
+    case "tetris": return "tetris";
+    case "tspin-single":
+    case "tspin-double":
+    case "tspin-triple":
+    case "tspin-mini-single":
+    case "tspin-mini-zero":
+    case "tspin-zero":
+      return "tspin";
+    case "single": return "single";
+    case "double": return "double";
+    case "triple": return "triple";
+    default: return null;
+  }
+}
+
 function bootstrap(): void {
   const playerCanvas = getRequiredCanvas("player");
   const cpuCanvas = getRequiredCanvas("cpu");
   const playerHudEl = getRequiredElement("player-hud");
   const cpuHudEl = getRequiredElement("cpu-hud");
   const seedEl = getRequiredElement("hud-seed");
+  const audioStateEl = getRequiredElement("hud-audio");
   const frameEl = getRequiredElement("hud-frame");
 
   const playerCtx = playerCanvas.getContext("2d");
@@ -122,6 +145,9 @@ function bootstrap(): void {
   if (playerCtx === null || cpuCtx === null) throw new Error("Canvas2D unavailable");
 
   let matchSeed = readSeedFromUrl() ?? (Date.now() | 0);
+
+  const sfx = new SfxEngine();
+  const bgm = new BgmPlayer(() => sfx.destination());
 
   const app: AppState = {
     screen: "title",
@@ -131,16 +157,27 @@ function bootstrap(): void {
     toasts: [],
     shakes: [],
     countdownMs: 0,
+    countdownPhase: 0,
     matchStartMs: 0,
     loser: null,
     timeMs: 0,
     particlesPlayer: new ParticleField(),
     particlesCpu: new ParticleField(),
     koFlashMs: 0,
+    prevIncomingPlayer: 0,
+    prevIncomingCpu: 0,
+    resultSfxFired: false,
   };
 
   const playerHud = mountHud(playerHudEl);
   const cpuHud = mountHud(cpuHudEl);
+
+  function updateAudioStateLabel(): void {
+    const s = sfx.enabled ? "SFX" : "sfx";
+    const m = bgm.enabled ? "MUSIC" : "music";
+    audioStateEl.textContent = `audio: ${s} / ${m}`;
+  }
+  updateAudioStateLabel();
 
   function reroll(): void {
     matchSeed = Date.now() | 0;
@@ -158,30 +195,58 @@ function bootstrap(): void {
     app.loser = null;
     app.matchStartMs = app.timeMs;
     app.countdownMs = 700 * 4; // 3, 2, 1, GO
+    app.countdownPhase = 4;
+    app.prevIncomingPlayer = 0;
+    app.prevIncomingCpu = 0;
+    app.resultSfxFired = false;
     app.screen = "countdown";
+    sfx.play("countdown");
+    if (bgm.enabled) bgm.start();
   }
 
   const kb = new Keyboard({
+    onGesture: () => sfx.resume(),
+    onSfx: (s) => {
+      if (app.screen !== "playing") return;
+      if (s === "softDropPress") return; // would be too noisy
+      sfx.play(s);
+    },
     onIntent: (intent) => {
       if (intent === "pause") {
-        if (app.screen === "playing") app.screen = "paused";
-        else if (app.screen === "paused") app.screen = "playing";
+        if (app.screen === "playing") {
+          app.screen = "paused";
+          if (bgm.enabled) bgm.stop();
+        } else if (app.screen === "paused") {
+          app.screen = "playing";
+          if (bgm.enabled) bgm.start();
+        }
       } else if (intent === "controls") {
         app.showControls = !app.showControls;
       } else if (intent === "rematch" || intent === "restart") {
         if (app.screen === "result" || app.screen === "title") {
           startMatch();
         }
+      } else if (intent === "mute") {
+        sfx.toggle();
+        updateAudioStateLabel();
+      } else if (intent === "music") {
+        bgm.toggle();
+        if (!bgm.enabled) bgm.stop();
+        else if (app.screen === "playing" || app.screen === "countdown") bgm.start();
+        updateAudioStateLabel();
       }
     },
   });
+  void kb;
 
-  // Title-screen ENTER handler (cannot easily go through Keyboard since it's
-  // not an in-game action).
+  // Title-screen ENTER handler.
   window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && app.screen === "title") {
-      ev.preventDefault();
-      startMatch();
+    if (ev.key === "Enter") {
+      sfx.resume();
+      if (app.screen === "title") {
+        ev.preventDefault();
+        startMatch();
+      }
     }
     if ((ev.key === "s" || ev.key === "S") && app.screen === "title") {
       reroll();
@@ -189,45 +254,60 @@ function bootstrap(): void {
     if ((ev.key === "t" || ev.key === "T") && app.screen === "result") {
       app.screen = "title";
       reroll();
+      bgm.stop();
     }
   });
+  // Pointer click also counts as a gesture.
+  window.addEventListener("pointerdown", () => sfx.resume(), { passive: true });
 
   let frameNumber = 0;
 
   const update = (dtMs: number): void => {
     frameNumber++;
     app.timeMs += dtMs;
+    sfx.tick(dtMs);
 
-    // Countdown phase
     if (app.screen === "countdown") {
+      const before = app.countdownPhase;
       app.countdownMs -= dtMs;
-      if (app.countdownMs <= 0) {
-        app.screen = "playing";
+      // Phases: countdownMs > 2100 → "3", > 1400 → "2", > 700 → "1", else "GO!"
+      let phase = 0;
+      if (app.countdownMs > 700 * 3) phase = 4;
+      else if (app.countdownMs > 700 * 2) phase = 3;
+      else if (app.countdownMs > 700 * 1) phase = 2;
+      else if (app.countdownMs > 0) phase = 1;
+      else phase = 0;
+      if (phase !== before) {
+        if (phase === 0) sfx.play("go");
+        else if (phase < before) sfx.play("countdown");
       }
+      app.countdownPhase = phase;
+      if (app.countdownMs <= 0) app.screen = "playing";
       return;
     }
 
     if (app.screen !== "playing") return;
 
-    // Drain inputs + apply to player.
     const actions = kb.drain(dtMs);
     for (const a of actions) app.battle.player.apply(a);
 
-    // Tick the battle (advances both states + AI).
     const events = app.battle.tick(dtMs);
 
-    // Translate events into toasts and shakes.
     for (const { side, event } of events) {
       const text = describeEvent(event);
       if (text !== null) app.toasts.push({ side, text, ttlMs: 1100, initialMs: 1100 });
       const amt = shakeAmountFor(event);
       if (amt > 0) app.shakes.push({ side, px: amt, ttlMs: 220, initialMs: 220 });
 
-      // Particle emit on line clears
+      if (event.type === "Lock" && side === "player") {
+        sfx.play("lock");
+      }
+
+      const clearSfx = sfxForClear(event);
+      if (clearSfx !== null && side === "player") sfx.play(clearSfx);
+
       if (event.type === "LinesCleared" && event.rows.length > 0) {
         const field = side === "player" ? app.particlesPlayer : app.particlesCpu;
-        // Translate row indices from board space (20 buffer + 20 visible) to
-        // canvas-visible row indices (subtract VISIBLE_TOP=20).
         const visibleRows = event.rows.map((r) => r - 20).filter((r) => r >= 0);
         field.emitClear(visibleRows, 0, "#22d3ee");
       }
@@ -238,17 +318,30 @@ function bootstrap(): void {
       }
     }
 
+    // Garbage warning rising-edge SFX (when incoming for the player crosses 4).
+    const incPlayer = app.battle.incomingFor("player");
+    if (incPlayer >= 4 && app.prevIncomingPlayer < 4) sfx.play("garbageWarn");
+    app.prevIncomingPlayer = incPlayer;
+    const incCpu = app.battle.incomingFor("cpu");
+    app.prevIncomingCpu = incCpu;
+
     if (app.loser !== null) {
       app.screen = "result";
-      app.shakes.push({ side: app.loser === "player" ? "player" : "cpu", px: 16, ttlMs: 500, initialMs: 500 });
+      app.shakes.push({ side: app.loser, px: 16, ttlMs: 500, initialMs: 500 });
+      if (!app.resultSfxFired) {
+        sfx.play("ko");
+        if (app.loser === "cpu") {
+          window.setTimeout(() => sfx.play("win"), 280);
+        }
+        app.resultSfxFired = true;
+        bgm.stop();
+      }
     }
 
-    // Tick particle fields
     app.particlesPlayer.tick(dtMs);
     app.particlesCpu.tick(dtMs);
     if (app.koFlashMs > 0) app.koFlashMs -= dtMs;
 
-    // Decay toasts + shakes
     app.toasts = app.toasts
       .map((t) => ({ ...t, ttlMs: t.ttlMs - dtMs }))
       .filter((t) => t.ttlMs > 0);
@@ -321,7 +414,6 @@ function drawWithShake(
   ctx.restore();
 }
 
-/** Pulses a red glow on the bottom rows when incoming garbage ≥ 4. */
 function drawWarningFlash(
   ctx: CanvasRenderingContext2D,
   incoming: number,
@@ -330,30 +422,28 @@ function drawWarningFlash(
   if (incoming < 4) return;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
-  const pulse = (Math.sin(timeMs / 60) + 1) / 2; // 0..1, 4 Hz-ish
+  const pulse = (Math.sin(timeMs / 60) + 1) / 2;
   ctx.save();
   ctx.fillStyle = `rgba(239, 68, 68, ${0.15 + 0.25 * pulse})`;
-  // Fill bottom 4 rows
   ctx.fillRect(0, h - 28 * 4, w, 28 * 4);
   ctx.restore();
 }
 
-/** Big "K.O." text scaling in over the loser's board. */
 function drawKoFlash(ctx: CanvasRenderingContext2D, ttlMs: number): void {
   const total = 500;
   const t = 1 - ttlMs / total;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
   ctx.save();
-  // White flash at the start
   if (t < 0.25) {
     ctx.fillStyle = `rgba(255, 255, 255, ${(0.25 - t) * 4})`;
     ctx.fillRect(0, 0, w, h);
   }
-  // Scaling K.O. text
   const scale = 0.4 + Math.min(t * 2.5, 1);
   ctx.translate(w / 2, h / 2);
   ctx.scale(scale, scale);
+  ctx.shadowColor = "#ef4444";
+  ctx.shadowBlur = 24;
   ctx.fillStyle = "#ef4444";
   ctx.font = "bold 64px monospace";
   ctx.textAlign = "center";
@@ -371,8 +461,11 @@ function drawSideToasts(
   if (toasts.length === 0) return;
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
+  ctx.save();
   ctx.font = "bold 13px monospace";
   ctx.textAlign = "center";
+  ctx.shadowColor = "rgba(110, 231, 255, 0.8)";
+  ctx.shadowBlur = 8;
   for (let i = 0; i < toasts.length; i++) {
     const t = toasts[i];
     if (t === undefined) continue;
@@ -381,6 +474,7 @@ function drawSideToasts(
     ctx.fillStyle = `rgba(231, 236, 243, ${1 - age})`;
     ctx.fillText(t.text, w / 2, y);
   }
+  ctx.restore();
   ctx.textAlign = "left";
 }
 
@@ -414,21 +508,36 @@ function drawTitle(
   cCtx: CanvasRenderingContext2D,
   app: AppState,
 ): void {
-  for (const ctx of [pCtx, cCtx]) {
-    dimOverlay(ctx);
-  }
+  for (const ctx of [pCtx, cCtx]) dimOverlay(ctx);
   const w = pCtx.canvas.width;
   const h = pCtx.canvas.height;
-  pCtx.fillStyle = "#e7ecf3";
-  pCtx.font = "bold 22px monospace";
+
+  // Animated gradient sweep behind the title text.
+  const sweep = (Math.sin(app.timeMs / 600) + 1) / 2;
+  const grad = pCtx.createLinearGradient(0, h / 2 - 80, w, h / 2 - 20);
+  grad.addColorStop(0, "#22d3ee");
+  grad.addColorStop(sweep, "#a855f7");
+  grad.addColorStop(1, "#22c55e");
+
+  pCtx.save();
+  pCtx.shadowColor = "rgba(110, 231, 255, 0.8)";
+  pCtx.shadowBlur = 18;
+  pCtx.fillStyle = grad;
+  pCtx.font = "bold 28px monospace";
   pCtx.textAlign = "center";
   pCtx.fillText("TETRIS", w / 2, h / 2 - 56);
-  pCtx.fillText("BATTLE", w / 2, h / 2 - 28);
+  pCtx.fillText("BATTLE", w / 2, h / 2 - 24);
+  pCtx.restore();
+
   pCtx.font = "12px monospace";
-  pCtx.fillStyle = "#8a93a4";
+  pCtx.textAlign = "center";
+  pCtx.fillStyle = "#e7ecf3";
   pCtx.fillText("press ENTER to fight", w / 2, h / 2 + 20);
+  pCtx.fillStyle = "#8a93a4";
   pCtx.fillText("S = new seed   ? = controls", w / 2, h / 2 + 40);
-  pCtx.fillText(`seed: ${formatSeed(app.matchSeed)}`, w / 2, h / 2 + 70);
+  pCtx.fillText("M = mute   N = music", w / 2, h / 2 + 58);
+  pCtx.fillStyle = "#6ee7ff";
+  pCtx.fillText(`seed: ${formatSeed(app.matchSeed)}`, w / 2, h / 2 + 86);
   pCtx.textAlign = "left";
 
   cCtx.fillStyle = "#8a93a4";
@@ -444,7 +553,6 @@ function drawCountdown(
   app: AppState,
 ): void {
   const remaining = app.countdownMs;
-  // Phases: GO at 0..700, 1 at 700..1400, 2 at 1400..2100, 3 at 2100..2800
   let label = "GO!";
   if (remaining > 700 * 3) label = "3";
   else if (remaining > 700 * 2) label = "2";
@@ -460,8 +568,13 @@ function drawCountdown(
     ctx.save();
     ctx.translate(w / 2, h / 2);
     ctx.scale(scale, scale);
-    ctx.fillStyle = `rgba(231, 236, 243, ${1 - t * 0.6})`;
-    ctx.font = "bold 60px monospace";
+    ctx.shadowColor = label === "GO!" ? "#22c55e" : "#6ee7ff";
+    ctx.shadowBlur = 20;
+    ctx.fillStyle =
+      label === "GO!"
+        ? `rgba(34, 197, 94, ${1 - t * 0.5})`
+        : `rgba(231, 236, 243, ${1 - t * 0.6})`;
+    ctx.font = "bold 64px monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(label, 0, 0);
@@ -475,12 +588,17 @@ function drawPaused(ctx: CanvasRenderingContext2D): void {
   dimOverlay(ctx);
   const w = ctx.canvas.width;
   const h = ctx.canvas.height;
+  ctx.save();
+  ctx.shadowColor = "rgba(110, 231, 255, 0.7)";
+  ctx.shadowBlur = 16;
   ctx.fillStyle = "#e7ecf3";
-  ctx.font = "bold 22px monospace";
+  ctx.font = "bold 24px monospace";
   ctx.textAlign = "center";
   ctx.fillText("PAUSED", w / 2, h / 2);
+  ctx.restore();
   ctx.font = "11px monospace";
   ctx.fillStyle = "#8a93a4";
+  ctx.textAlign = "center";
   ctx.fillText("press P to resume", w / 2, h / 2 + 20);
   ctx.textAlign = "left";
 }
@@ -498,21 +616,25 @@ function drawResult(
   const w = pCtx.canvas.width;
   const h = pCtx.canvas.height;
 
+  loserCtx.save();
+  loserCtx.shadowColor = "#ef4444";
+  loserCtx.shadowBlur = 20;
   loserCtx.fillStyle = "#ef4444";
-  loserCtx.font = "bold 36px monospace";
+  loserCtx.font = "bold 40px monospace";
   loserCtx.textAlign = "center";
   loserCtx.textBaseline = "middle";
   loserCtx.fillText("K.O.", w / 2, h / 2 - 12);
+  loserCtx.restore();
 
+  winnerCtx.save();
+  winnerCtx.shadowColor = "#22c55e";
+  winnerCtx.shadowBlur = 18;
   winnerCtx.fillStyle = "#22c55e";
-  winnerCtx.font = "bold 24px monospace";
+  winnerCtx.font = "bold 26px monospace";
   winnerCtx.textAlign = "center";
   winnerCtx.textBaseline = "middle";
   winnerCtx.fillText(playerWon ? "YOU WIN" : "CPU WINS", w / 2, h / 2 - 30);
-
-  // Stats below
-  const winner = playerWon ? app.battle.player : app.battle.cpu;
-  const loser = playerWon ? app.battle.cpu : app.battle.player;
+  winnerCtx.restore();
 
   for (const [ctx, gs, label] of [
     [pCtx, app.battle.player, "YOU"] as const,
@@ -528,14 +650,10 @@ function drawResult(
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
   }
-
-  void winner;
-  void loser;
 }
 
 function drawControls(ctx: CanvasRenderingContext2D): void {
   dimOverlay(ctx);
-  const w = ctx.canvas.width;
   const lines = [
     "CONTROLS",
     "",
@@ -548,6 +666,8 @@ function drawControls(ctx: CanvasRenderingContext2D): void {
     "C/Sh  hold",
     "P/Esc pause",
     "?     toggle help",
+    "M     mute SFX",
+    "N     toggle music",
     "R     rematch",
     "T     title",
   ];
@@ -557,9 +677,8 @@ function drawControls(ctx: CanvasRenderingContext2D): void {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (line === undefined) continue;
-    ctx.fillText(line, 16, 30 + i * 18);
+    ctx.fillText(line, 16, 28 + i * 18);
   }
-  void w;
 }
 
 bootstrap();

@@ -9,21 +9,42 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
+    <div class="bg-glow"></div>
     <main id="app">
       <section class="board-wrap" data-side="player">
         <h2 class="board-label">YOU</h2>
-        <canvas id="player" width="280" height="560" aria-label="Your playfield"></canvas>
+        <div class="board-frame">
+          <canvas id="player" width="280" height="560" aria-label="Your playfield"></canvas>
+        </div>
         <div class="board-hud" id="player-hud"></div>
       </section>
 
       <section class="center-hud" id="hud">
+        <h1 class="brand">TETRIS BATTLE</h1>
         <div class="hud-line" id="hud-seed">seed: 0x00000000</div>
-        <div class="hud-line" id="hud-frame">frame: 0</div>
+        <div class="hud-line" id="hud-audio">audio: SFX / music</div>
+        <div class="hud-line hud-dim" id="hud-frame">frame: 0</div>
+        <div class="hud-divider"></div>
+        <div class="hud-line hud-dim">CONTROLS</div>
+        <pre class="hud-keys">← → move
+↓     soft drop
+↑/X   rotate CW
+Z     rotate CCW
+A     rotate 180
+Space hard drop
+C/Sh  hold
+P/Esc pause
+?     toggle help
+M     mute SFX
+N     toggle music
+R     rematch  T  title</pre>
       </section>
 
       <section class="board-wrap" data-side="cpu">
         <h2 class="board-label">CPU</h2>
-        <canvas id="cpu" width="280" height="560" aria-label="CPU playfield"></canvas>
+        <div class="board-frame">
+          <canvas id="cpu" width="280" height="560" aria-label="CPU playfield"></canvas>
+        </div>
         <div class="board-hud" id="cpu-hud"></div>
       </section>
     </main>
